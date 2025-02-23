@@ -61,16 +61,18 @@ def create_g_function(g_values, Zprim):
     Returns:
     function: An interpolated function g(Z) that can be applied to general Z values.
     """
+    N = len(g_values) // len(Zprim)
+
+    g_z = g_values[:N]
+
+    img = Zprim[0]
     
-    # Flatten Zprim to get all sampled intensity values
-    Z_flat = np.concatenate([img.flatten() for img in Zprim])
-    
-    # Ensure uniqueness by sorting and removing duplicates (monotonic increase for interpolation)
-    unique_Z = np.unique(Z_flat)
-    unique_g = g_values[:len(unique_Z)]  # Match corresponding g values
+    first_channel = img[:, :, 0].flatten()
+
+    #print(np.shape(g_z))
     
     # Create an interpolation function
-    g_interpolated = interp1d(unique_Z, unique_g, kind='linear', fill_value='extrapolate')
+    g_interpolated = interp1d(first_channel, g_z, kind='linear', fill_value='extrapolate')
     
     return g_interpolated
 
@@ -180,7 +182,7 @@ if __name__ == "__main__":
 
     g = create_g_function(g_z_values, Zprim)
 
-    #hdr_image = merge_hdr(images, exposure_times, g)
-    #ldr_image = tone_map(hdr_image)
-    #save_image("hdr_image.JPG", ldr_image)
+    hdr_image = merge_hdr(images, exposure_times, g)
+    ldr_image = tone_map(hdr_image)
+    save_image("hdr_image.JPG", ldr_image)
     
