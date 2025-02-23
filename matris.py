@@ -6,7 +6,8 @@ import scipy.sparse.linalg as spla
 import imageio
 import glob
 import piexif
-from scipy.interpolate import interp1d  # Import interpolation function
+from scipy.interpolate import interp1d
+import matplotlib.pyplot as plt
 
 
 epsilon = 1e-6
@@ -89,7 +90,7 @@ def approximate_g(images, exposure_times):
     A = sp.hstack([ones_matrix, tiled_matrix], format='csr')
 
     # Vektorn b som är ln(exponeringstider)
-    ln_delta_t = np.log(exposure_times)
+    ln_delta_t = M * np.log(exposure_times)
 
     x = spla.lsqr(A, ln_delta_t)[0]  
 
@@ -182,7 +183,21 @@ if __name__ == "__main__":
 
     g = create_g_function(g_z_values, Zprim)
 
-    hdr_image = merge_hdr(images, exposure_times, g)
-    ldr_image = tone_map(hdr_image)
-    save_image("hdr_image.JPG", ldr_image)
+
+    # Create linspace from 0 to 255
+    x = np.linspace(0, 255, 100)
+    y = np.exp(g(x))
+
+    # Plot the function
+    plt.plot(y, x, label='CRF(x)')
+    plt.xlabel('x')
+    plt.ylabel('f(x)')
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+
+    #hdr_image = merge_hdr(images, exposure_times, g)
+    #ldr_image = tone_map(hdr_image)
+    #save_image("hdr_image.JPG", ldr_image)
     
