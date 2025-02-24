@@ -27,89 +27,33 @@ def load_exposure_images(image_files):
     exposure_times = np.array(exposure_times, dtype=np.float32)
     return images, exposure_times
 
-def interpolate_g(g_sparse, Z_sparse, Z_full):
-    """
-    Interpolate g(Z) for the full set of pixel values Z_full using sparse g(Z) values.
-    
-    g_sparse: The sparse g(Z) values computed for a subset of Z values (M//10000 points).
-    Z_sparse: The corresponding pixel values where g_sparse was computed (M//10000 values).
-    Z_full: The full set of pixel values (M values) for which we need to interpolate g(Z).
-    """
-    N = len(Z_sparse)
-    g_new = g_sparse.reshape(N, len(g_sparse) // N)
-    print(np.shape(g_new))
-    print(np.shape(Z_sparse))
-    # Create an interpolation function
-    g_full = []
-    for i in range(N):
-        interpolator = interp1d(Z_sparse[i], g_new[i], kind='linear', fill_value="extrapolate")
-        
-        # Interpolate g(Z) for all pixels in Z_full
-        g = interpolator(Z_full)
-        g_full.append(g)
-    
-    return g_full
-
 
 def create_g_function(g_values, Zprim):
-    """
-    Creates an interpolation function g that can be applied to a general input Z.
-    
-    Parameters:
-    g_values (np.array): The approximated g function values.
-    Zprim (list of np.array): The downsampled pixel intensity values used for approximation.
-    
-    Returns:
-    function: An interpolated function g(Z) that can be applied to general Z values.
-    """
-    N = len(g_values) // len(Zprim)
-
-    g_z = g_values[:N]
-
-    img = Zprim[0]
-    
-    first_channel = img[:, :, 0].flatten()
-
-    #print(np.shape(g_z))
-    
-    # Create an interpolation function
-    g_interpolated = interp1d(first_channel, g_z, kind='linear', fill_value='extrapolate')
-    
-    return g_interpolated
-
-
-from scipy.interpolate import PchipInterpolator
-
-def create_g_function2(g_values, Zprim):
-    """
-    Creates a monotonic interpolation function g that can be applied to a general input Z.
-    
-    Parameters:
-    g_values (np.array): The approximated g function values.
-    Zprim (list of np.array): The downsampled pixel intensity values used for approximation.
-    
-    Returns:
-    function: A monotonically increasing interpolated function g(Z).
-    """
     N = len(g_values) // len(Zprim)
     g_z = g_values[:N]
 
     img = Zprim[0]
-    first_channel = img[:, :, 0].flatten()
+    first_channel = img[:, :, 1].flatten()
 
-    # Ensure the data is sorted for monotonic interpolation
+    # Sortera datan för "garanterad" monoton funktion
     first_channel_sorted = np.sort(first_channel)
     g_z_sorted = np.sort(g_z)
-    g_z_monotonic = np.maximum.accumulate(g_z_sorted)
 
-    # Use PchipInterpolator to ensure a monotonically increasing function
-    #g_interpolated = PchipInterpolator(first_channel_sorted, g_z_sorted)
-    g_interpolated = interp1d(first_channel_sorted, g_z_monotonic, kind='linear', fill_value='extrapolate')
+    # Plotta funktionen
+    plt.plot(first_channel_sorted, np.exp(g_z_sorted), label='CRF(x)')
+    plt.xlabel('x')
+    plt.ylabel('CRF(x)')
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+    # Interpolera för att få en ordentlig funktion
+    g_interpolated = interp1d(first_channel_sorted, g_z_sorted, kind='linear', fill_value='extrapolate')
 
     return g_interpolated
 
 
-def approximate_g(images, exposure_times):
+def approximate_g(images, exposure_times, lambda_smooth=10000):
     N = len(images)  # Antalet bilder
     M = images[0].shape[0] * images[0].shape[1] # Antalet pixlar i varje bild (antar att bilderna har samma storlek)
 
@@ -124,7 +68,25 @@ def approximate_g(images, exposure_times):
     # Vektorn b som är ln(exponeringstider)
     ln_delta_t = M * np.log(exposure_times)
 
-    x = spla.lsqr(A, ln_delta_t)[0]  
+
+    # Andra derivatan matrisen
+    zero_matrix = sp.csr_matrix((N,M))
+    neg_2I = -2 * identity_matrix
+
+    blocks = []
+    
+    # Cyclysikt identitetsmatriser
+    for _ in range(M // 3):
+        blocks.extend([identity_matrix, neg_2I, identity_matrix])
+    
+    D = sp.hstack(blocks, format='csr')
+    A_reg = sp.hstack([zero_matrix, lambda_smooth * D], format='csr')
+    
+    A_combined = sp.vstack([A, A_reg], format='csr')
+    b_combined = np.hstack([ln_delta_t, np.zeros(N)])
+
+    # lös minsta kvadrat problemet
+    x = spla.lsqr(A_combined, b_combined)[0]  
 
     g = x[M:]
     
@@ -132,22 +94,21 @@ def approximate_g(images, exposure_times):
 
 
 def downsample_image(image, r):
-    """Scales down an RGB image by averaging pixel values within an r x r block."""
-    H, W, C = image.shape  # Height, Width, Channels
+    """Skala ned en RGB bild genom at ta medel pixel värden inom ett r x r block."""
+    H, W, C = image.shape  # Höjd, Bredd, Färgkanal
     
-    # New dimensions after downsampling
+    # Nya höjd och bredd dimensioner
     new_H = H // r
     new_W = W // r
     
-    # Create an empty array for the downsampled image
     downsampled = np.zeros((new_H, new_W, C), dtype=np.uint8)
     
-    # Iterate over blocks of size r x r
     for i in range(new_H):
         for j in range(new_W):
-            for c in range(C):  # Iterate over color channels
-                block = image[i*r:(i+1)*r, j*r:(j+1)*r, c]  # Extract r x r block
-                downsampled[i, j, c] = np.mean(block, dtype=np.float32)  # Compute mean
+            for c in range(C): # iteration över varje färgkanal
+                # Beräkna medelvärdet för ett r x r block
+                block = image[i*r:(i+1)*r, j*r:(j+1)*r, c] 
+                downsampled[i, j, c] = np.mean(block, dtype=np.float32)
             
     return downsampled
 
@@ -200,27 +161,23 @@ if __name__ == "__main__":
 
     images = np.array(images)
 
-    Zprim = [downsample_image(image, 200) for image in images]
+    Zprim = [downsample_image(image, 100) for image in images]
 
     # approximera g
     g_z_values = approximate_g(Zprim, exposure_times)
 
     M = Zprim[0].shape[0] * Zprim[0].shape[1]
 
-    #g_full = interpolate_g(g_z_values, Zprim, images)
-
     #save_image("downsampled1.JPG", Zprim[0])
     #save_image("downsampled2.JPG", Zprim[1])
     #save_image("downsampled3.JPG", Zprim[2])
 
-    g = create_g_function2(g_z_values, Zprim)
+    g = create_g_function(g_z_values, Zprim)
 
 
-    # Create linspace from 0 to 255
     x = np.linspace(0, 255, 100)
-    y = np.exp(g(x))* exposure_times[0]
+    y = np.exp(g(x)) / exposure_times[0]
 
-    # Plot the function
     plt.plot(y, x, label='CRF(x)')
     plt.xlabel('x')
     plt.ylabel('CRF(x)')
@@ -229,7 +186,7 @@ if __name__ == "__main__":
     plt.show()
 
 
-    #hdr_image = merge_hdr(images, exposure_times, g)
-    #ldr_image = tone_map(hdr_image)
-    #save_image("hdr_image.JPG", ldr_image)
+    # hdr_image = merge_hdr(images, exposure_times, g)
+    # ldr_image = tone_map(hdr_image)
+    # save_image("hdr_image.JPG", ldr_image)
     
