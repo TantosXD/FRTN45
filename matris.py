@@ -77,6 +77,38 @@ def create_g_function(g_values, Zprim):
     
     return g_interpolated
 
+
+from scipy.interpolate import PchipInterpolator
+
+def create_g_function2(g_values, Zprim):
+    """
+    Creates a monotonic interpolation function g that can be applied to a general input Z.
+    
+    Parameters:
+    g_values (np.array): The approximated g function values.
+    Zprim (list of np.array): The downsampled pixel intensity values used for approximation.
+    
+    Returns:
+    function: A monotonically increasing interpolated function g(Z).
+    """
+    N = len(g_values) // len(Zprim)
+    g_z = g_values[:N]
+
+    img = Zprim[0]
+    first_channel = img[:, :, 0].flatten()
+
+    # Ensure the data is sorted for monotonic interpolation
+    first_channel_sorted = np.sort(first_channel)
+    g_z_sorted = np.sort(g_z)
+    g_z_monotonic = np.maximum.accumulate(g_z_sorted)
+
+    # Use PchipInterpolator to ensure a monotonically increasing function
+    #g_interpolated = PchipInterpolator(first_channel_sorted, g_z_sorted)
+    g_interpolated = interp1d(first_channel_sorted, g_z_monotonic, kind='linear', fill_value='extrapolate')
+
+    return g_interpolated
+
+
 def approximate_g(images, exposure_times):
     N = len(images)  # Antalet bilder
     M = images[0].shape[0] * images[0].shape[1] # Antalet pixlar i varje bild (antar att bilderna har samma storlek)
@@ -168,7 +200,7 @@ if __name__ == "__main__":
 
     images = np.array(images)
 
-    Zprim = [downsample_image(image, 100) for image in images]
+    Zprim = [downsample_image(image, 200) for image in images]
 
     # approximera g
     g_z_values = approximate_g(Zprim, exposure_times)
@@ -181,17 +213,17 @@ if __name__ == "__main__":
     #save_image("downsampled2.JPG", Zprim[1])
     #save_image("downsampled3.JPG", Zprim[2])
 
-    g = create_g_function(g_z_values, Zprim)
+    g = create_g_function2(g_z_values, Zprim)
 
 
     # Create linspace from 0 to 255
     x = np.linspace(0, 255, 100)
-    y = np.exp(g(x))
+    y = np.exp(g(x))* exposure_times[0]
 
     # Plot the function
     plt.plot(y, x, label='CRF(x)')
     plt.xlabel('x')
-    plt.ylabel('f(x)')
+    plt.ylabel('CRF(x)')
     plt.legend()
     plt.grid(True)
     plt.show()
