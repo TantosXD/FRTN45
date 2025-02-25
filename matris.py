@@ -10,7 +10,7 @@ from scipy.interpolate import interp1d
 import matplotlib.pyplot as plt
 
 
-epsilon = 1e-6
+epsilon = 1e-3
 
 def load_exposure_images(image_files):
     images = []
@@ -28,34 +28,34 @@ def load_exposure_images(image_files):
     return images, exposure_times
 
 
-def create_g_function(g_values, Zprim):
+def create_g_function(g_values, Zprim, delta_t):
     N = len(g_values) // len(Zprim)
     g_z = g_values[:N]
 
     img = Zprim[0]
-    first_channel = img[:, :, 1].flatten()
+    first_channel = img[:, 1].flatten()
 
     # Sortera datan för "garanterad" monoton funktion
     first_channel_sorted = np.sort(first_channel)
     g_z_sorted = np.sort(g_z)
 
     # Plotta funktionen
-    plt.plot(first_channel_sorted, np.exp(g_z_sorted), label='CRF(x)')
+    plt.plot(first_channel_sorted, np.exp(g_z_sorted) / delta_t, label='CRF(x)')
     plt.xlabel('x')
     plt.ylabel('CRF(x)')
     plt.legend()
     plt.grid(True)
     plt.show()
 
-    # Interpolera för att få en ordentlig funktion
+    # Interpolera för att få en fullständig funktion
     g_interpolated = interp1d(first_channel_sorted, g_z_sorted, kind='linear', fill_value='extrapolate')
 
     return g_interpolated
 
 
-def approximate_g(images, exposure_times, lambda_smooth=10000):
+def approximate_g(images, exposure_times, M, lambda_smooth=100):
     N = len(images)  # Antalet bilder
-    M = images[0].shape[0] * images[0].shape[1] # Antalet pixlar i varje bild (antar att bilderna har samma storlek)
+    #M = images[0].shape[0] * images[0].shape[1] # Antalet pixlar i varje bild (antar att bilderna har samma storlek)
 
     ones_matrix = -sp.csr_matrix(np.ones((N, M)))
 
@@ -82,11 +82,11 @@ def approximate_g(images, exposure_times, lambda_smooth=10000):
     D = sp.hstack(blocks, format='csr')
     A_reg = sp.hstack([zero_matrix, lambda_smooth * D], format='csr')
     
-    A_combined = sp.vstack([A, A_reg], format='csr')
+    A_combined = A + A_reg #sp.vstack([A, A_reg], format='csr')
     b_combined = np.hstack([ln_delta_t, np.zeros(N)])
 
     # lös minsta kvadrat problemet
-    x = spla.lsqr(A_combined, b_combined)[0]  
+    x = spla.lsqr(A_combined, ln_delta_t)[0]  
 
     g = x[M:]
     
@@ -94,7 +94,6 @@ def approximate_g(images, exposure_times, lambda_smooth=10000):
 
 
 def downsample_image(image, r):
-    """Skala ned en RGB bild genom at ta medel pixel värden inom ett r x r block."""
     H, W, C = image.shape  # Höjd, Bredd, Färgkanal
     
     # Nya höjd och bredd dimensioner
@@ -121,14 +120,27 @@ def compute_weights(Z):
     weights = np.where(Z <= (Zmin + Zmax) / 2, Z - Zmin, Zmax - Z) # Triangulär vikt
     return weights
 
+def compute_image_weights(images):
+    image_weights  = []
+    for i in range(len(images)):
+        Z = images[i]
+        weights = compute_weights(Z)
+        image_weights.append(weights)
+    return image_weights
+
+
 def merge_hdr(images, exposure_times, g):
-    images = np.stack(images, axis=-1)  # Arrayen är av formen (H, W, C, N) höjd, bredd, färgkanal, bildnummer
-    weights = compute_weights(images)
+    # Arrayen är av formen (N, H, W, C) bildnummer, höjd, bredd, färgkanal
+    image_weights = compute_image_weights(images)
     log_exposures = np.log(exposure_times)
     
     # Tillämpa Debevecs HDR alogritm
-    numerator = np.sum(weights * (g(images) - log_exposures.reshape(1,1,1,-1)), axis=-1)
-    denominator = np.sum(weights, axis=-1)
+    numerator = np.sum(image_weights * (g(images) - log_exposures[:, None, None, None]), axis=0)
+    denominator = np.sum(image_weights, axis=0)
+
+    print(np.shape(numerator))
+    print(denominator.max(), denominator.min())
+
     hdr= np.exp(numerator / (denominator + epsilon)) # exponering
     return hdr
 
@@ -154,6 +166,18 @@ def tone_map(hdr_image):
 def save_image(filename, image):
     imageio.imwrite(filename, image)
 
+def rand_pixels(images, k=900):
+    Zprim = []
+
+    for image in images:
+        h, w, _ = image.shape  # Get image dimensions
+        random_rows = np.random.randint(0, h, k)
+        random_cols = np.random.randint(0, w, k)
+        sampled_pixels = image[random_rows, random_cols, :]  # Extract k random pixels
+        Zprim.append(sampled_pixels)
+
+    return Zprim
+
 if __name__ == "__main__":
     image_files = sorted(glob.glob("bilder/*.JPG"))
     
@@ -161,10 +185,13 @@ if __name__ == "__main__":
 
     images = np.array(images)
 
-    Zprim = [downsample_image(image, 100) for image in images]
+    #Zprim = [image[:30:,:30:,:] for image in images]
+
+    Zprim = rand_pixels(images)
+    print(np.shape(Zprim))
 
     # approximera g
-    g_z_values = approximate_g(Zprim, exposure_times)
+    g_z_values = approximate_g(Zprim, exposure_times, M=900)
 
     M = Zprim[0].shape[0] * Zprim[0].shape[1]
 
@@ -172,7 +199,7 @@ if __name__ == "__main__":
     #save_image("downsampled2.JPG", Zprim[1])
     #save_image("downsampled3.JPG", Zprim[2])
 
-    g = create_g_function(g_z_values, Zprim)
+    g = create_g_function(g_z_values, Zprim, exposure_times[0])
 
 
     x = np.linspace(0, 255, 100)
@@ -186,7 +213,8 @@ if __name__ == "__main__":
     plt.show()
 
 
-    # hdr_image = merge_hdr(images, exposure_times, g)
-    # ldr_image = tone_map(hdr_image)
-    # save_image("hdr_image.JPG", ldr_image)
+    hdr_image = merge_hdr(images, exposure_times, g)
+    print(np.shape(hdr_image))
+    ldr_image = tone_map(hdr_image)
+    save_image("hdr_image.JPG", ldr_image)
     
