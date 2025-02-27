@@ -39,13 +39,13 @@ def create_g_function(g_values, Zprim, delta_t):
     first_channel_sorted = np.sort(first_channel)
     g_z_sorted = np.sort(g_z)
 
-    # Plotta funktionen
-    plt.plot(first_channel_sorted, np.exp(g_z_sorted) / delta_t, label='CRF(x)')
-    plt.xlabel('x')
-    plt.ylabel('CRF(x)')
-    plt.legend()
-    plt.grid(True)
-    plt.show()
+    # # Plotta funktionen
+    # plt.plot(first_channel_sorted, np.exp(g_z_sorted) / delta_t, label='CRF(x)')
+    # plt.xlabel('x')
+    # plt.ylabel('CRF(x)')
+    # plt.legend()
+    # plt.grid(True)
+    # plt.show()
 
     # Interpolera för att få en fullständig funktion
     g_interpolated = interp1d(first_channel_sorted, g_z_sorted, kind='linear', fill_value='extrapolate')
