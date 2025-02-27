@@ -170,10 +170,10 @@ def rand_pixels(images, k=900):
     Zprim = []
 
     for image in images:
-        h, w, _ = image.shape  # Get image dimensions
+        h, w, _ = image.shape  # Bild dimensioner
         random_rows = np.random.randint(0, h, k)
         random_cols = np.random.randint(0, w, k)
-        sampled_pixels = image[random_rows, random_cols, :]  # Extract k random pixels
+        sampled_pixels = image[random_rows, random_cols, :]
         Zprim.append(sampled_pixels)
 
     return Zprim
