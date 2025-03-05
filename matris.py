@@ -8,8 +8,6 @@ import glob
 import piexif
 from scipy.interpolate import interp1d
 import matplotlib.pyplot as plt
-from scipy.ndimage import gaussian_filter1d
-from Democratic_tonemap import tonemap
 import cv2
 
 def align_images(images):
@@ -99,21 +97,24 @@ def create_g_function(g_values, Zprim, delta_t):
     print(np.shape(g_z))
 
     img = Zprim[0]
-    first_channel = img[:, 1].flatten()
+    first_channel = img[:, :, 1].flatten()
 
     # Sortera datan för "garanterad" monoton funktion
-    first_channel_sorted = np.sort(first_channel) + epsilon
-    g_z_sorted = np.sort(g_z) 
+    first_channel_sorted = np.sort(first_channel)
+    g_z_sorted = np.sort(g_z) + epsilon
+
+    Z = [rgb + 1e-8 * i for i, rgb in enumerate(first_channel_sorted)]
+    g = [g_z + 1e-8 * i for i, g_z in enumerate(g_z_sorted)]
 
     # Interpolera för att få en fullständig funktion
-    g_interpolated = interp1d(first_channel_sorted, g_z_sorted, kind='linear', fill_value='extrapolate')
+    g_interpolated = interp1d(Z, g, kind='linear', fill_value='extrapolate')
 
     return g_interpolated
 
 
-def approximate_g(images, exposure_times, M, lambda_smooth=1000):
+def approximate_g(images, exposure_times):
     N = len(images)  # Antalet bilder
-    #M = images[0].shape[0] * images[0].shape[1] # Antalet pixlar i varje bild (antar att bilderna har samma storlek)
+    M = images[0].shape[0] * images[0].shape[1] # Antalet pixlar i varje bild (antar att bilderna har samma storlek)
 
     ones_matrix = -sp.csr_matrix(np.ones((N, M)))
 
@@ -133,32 +134,6 @@ def approximate_g(images, exposure_times, M, lambda_smooth=1000):
     ln_delta_t = M * np.log(exposure_times)
 
 
-    # # Andra derivatan matrisen
-    # zero_matrix = sp.csr_matrix((N,M))
-    # neg_2I = -2 * identity_matrix
-
-    # blocks = []
-    
-    # # Cyclysikt identitetsmatriser
-    # for _ in range(M // 3):
-    #     blocks.extend([identity_matrix, neg_2I, identity_matrix])
-    
-    # D = sp.hstack(blocks, format='csr')
-    # A_reg = sp.hstack([zero_matrix, lambda_smooth * D], format='csr')
-    
-    # A_combined = A + A_reg #sp.vstack([A, A_reg], format='csr')
-    # b_combined = np.hstack([ln_delta_t, np.zeros(N)])
-
-    # # Add constraint g(128) = 0
-    # constraint = sp.lil_matrix((N, A_combined.shape[1]))
-    # for i in range(N):
-    #     constraint[i, M + M //2 + i] = 1
-
-    # A_combined = sp.vstack([A_combined, constraint], format='csr')
-    # b_combined = np.hstack([ln_delta_t, np.ones(N)])
-    # print(np.shape(A_combined))
-    # print(np.shape(b_combined))
-    # lös minsta kvadrat problemet
     x = spla.lsqr(A, ln_delta_t)[0]  
 
     g = x[M:]
@@ -187,8 +162,8 @@ def approximate_g(images, exposure_times, M, lambda_smooth=1000):
 
 
 def compute_weights(Z):
-    Zmin = np.min(Z)
-    Zmax = np.max(Z)
+    Zmin = np.min(Z).astype(np.uint16)
+    Zmax = np.max(Z).astype(np.uint16)
     #weights = Z * (1 - Z)  # Polynom vikt
     #weights = np.exp(-((Z - 0.5) ** 2) / (2 * 0.1 ** 2)) # Gauss vikt
     weights = np.where(Z <= (Zmin + Zmax) / 2, Z - Zmin, Z) # Triangulär vikt
@@ -239,31 +214,6 @@ def tone_map(hdr_image):
 
     return ldr_image
 
-def democratic_tonemapping(image, percentile=90):
-    """
-    Apply democratic tone mapping to an image.
-    
-    Parameters:
-        image (numpy.ndarray): Input HDR image (float32 or float64, range 0-1 or 0-255).
-        percentile (float): The percentile used for normalization (default: 90).
-        
-    Returns:
-        numpy.ndarray: Tone-mapped image (uint8, range 0-255).
-    """
-    # Ensure the image is in float format
-    image = image.astype(np.float32)
-    
-    # Compute the percentile intensity per channel
-    percentiles = np.percentile(image, percentile, axis=(0, 1))
-    
-    # Normalize each channel separately
-    tone_mapped = image / (percentiles + 1e-6)  # Avoid division by zero
-    tone_mapped = np.clip(tone_mapped, 0, 1)  # Clip values to [0,1]
-    
-    # Convert to 8-bit format
-    tone_mapped = (tone_mapped * 255).astype(np.uint8)
-    
-    return tone_mapped
 
 def save_image(filename, image):
     imageio.imwrite(filename, image)
@@ -285,17 +235,19 @@ if __name__ == "__main__":
     
     images, exposure_times = load_exposure_images(image_files)
 
+    #images = np.array(images)
+
     images = align_images(np.array(images))
 
     save_image("downsampled1.JPG", images[2])
 
-    #Zprim image[:, ::100,::100,:]
+    Zprim= images[:, ::100,::100,:]
 
-    Zprim = rand_pixels(images)
+    #Zprim = rand_pixels(images, k=300)
     print(np.shape(Zprim))
 
     # approximera g
-    g_z_values, lE = approximate_g(Zprim, exposure_times, M=900)
+    g_z_values, lE = approximate_g(Zprim, exposure_times)
 
     M = Zprim[0].shape[0] * Zprim[0].shape[1]
 
