@@ -90,7 +90,7 @@ def load_exposure_images(image_files):
     return images, exposure_times
 
 
-def create_g_function(g_values, Zprim, delta_t):
+def create_g_function(g_values, Zprim):
     N = len(g_values) // len(Zprim)
     g_z = g_values[:N]
 
@@ -103,6 +103,7 @@ def create_g_function(g_values, Zprim, delta_t):
     first_channel_sorted = np.sort(first_channel)
     g_z_sorted = np.sort(g_z) + epsilon
 
+    # Lägg stil små variationer för att undvika division med noll under interpolation
     Z = [rgb + 1e-8 * i for i, rgb in enumerate(first_channel_sorted)]
     g = [g_z + 1e-8 * i for i, g_z in enumerate(g_z_sorted)]
 
@@ -185,7 +186,7 @@ def merge_hdr(images, exposure_times, g):
     log_exposures = np.log(exposure_times)
     
     # Tillämpa Debevecs HDR alogritm
-    numerator = np.sum(image_weights * np.exp((g(images) - log_exposures[:, None, None, None])), axis=0)
+    numerator = np.sum(image_weights * np.exp((g(images + epsilon) - log_exposures[:, None, None, None])), axis=0)
     #denominator = np.sum(image_weights, axis=0)
 
     #hdr= np.exp(numerator / (denominator + epsilon))
@@ -218,13 +219,13 @@ def tone_map(hdr_image):
 def save_image(filename, image):
     imageio.imwrite(filename, image)
 
-def rand_pixels(images, k=900):
+def rand_pixels(images, M=900):
     Zprim = []
 
     for image in images:
         h, w, _ = image.shape  # Bild dimensioner
-        random_rows = np.random.randint(0, h, k)
-        random_cols = np.random.randint(0, w, k)
+        random_rows = np.random.randint(0, h, M)
+        random_cols = np.random.randint(0, w, M)
         sampled_pixels = image[random_rows, random_cols, :]
         Zprim.append(sampled_pixels)
 
