@@ -167,7 +167,7 @@ def compute_weights(Z):
     Zmax = np.max(Z).astype(np.uint16)
     #weights = Z * (1 - Z)  # Polynom vikt
     #weights = np.exp(-((Z - 0.5) ** 2) / (2 * 0.1 ** 2)) # Gauss vikt
-    weights = np.where(Z <= (Zmin + Zmax) / 2, Z - Zmin, Z) # Triangulär vikt
+    weights = np.where(Z <= (Zmin + Zmax) / 2, Z - Zmin, Zmax - Z) # Triangulär vikt
 
     return weights
 
@@ -236,9 +236,9 @@ if __name__ == "__main__":
     
     images, exposure_times = load_exposure_images(image_files)
 
-    #images = np.array(images)
+    images = np.array(images)
 
-    images = align_images(np.array(images))
+    #images = align_images(np.array(images))
 
     save_image("downsampled1.JPG", images[2])
 
@@ -256,7 +256,7 @@ if __name__ == "__main__":
     #save_image("downsampled2.JPG", Zprim[1])
     #save_image("downsampled3.JPG", Zprim[2])
 
-    g = create_g_function(g_z_values, Zprim, exposure_times[0])
+    g = create_g_function(g_z_values, Zprim)
 
 
     x = np.linspace(0, 255, 100)
